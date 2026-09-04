@@ -1,0 +1,31 @@
+agent:
+  monitoring:
+    enabled: true
+    logs: true
+    metrics: true
+
+inputs:
+  - id: syslog-tcp
+    type: tcp
+    use_output: default
+    streams:
+      - id: tcp-syslog-9514
+        data_stream:
+          type: logs
+          dataset: syslog.tcp
+          namespace: default
+        host: "0.0.0.0:9514"
+        max_message_size: 50KiB
+        processors:
+          - syslog:
+              field: message
+              format: auto
+              timezone: Local
+              ignore_missing: true
+              ignore_failure: false
+              tag: syslog_parse
+
+outputs:
+  default:
+    type: elasticsearch
+    hosts: ["http://elasticsearch:9200"]

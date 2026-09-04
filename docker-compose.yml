@@ -1,0 +1,99 @@
+name: solace-elastic-lab
+
+services:
+
+  solace:
+    image: solace/solace-pubsub-standard:${SOLACE_VERSION:-latest}
+    container_name: solace-pubsub
+    hostname: solace
+    shm_size: 2g
+    ulimits:
+      core: -1
+      nofile:
+        soft: 2448
+        hard: 1048576
+    environment:
+      username_admin_globalaccesslevel: admin
+      username_admin_password: admin
+      system_scaling_maxconnectioncount: "100"
+    ports:
+      - "8080:8080"    # PubSub+ Manager + SEMP (HTTP)
+      - "1943:1943"    # PubSub+ Manager (HTTPS)
+      - "55554:55555"  # SMF
+      - "8008:8008"    # Web Messaging
+      - "1883:1883"    # MQTT
+      - "5672:5672"    # AMQP
+      - "9000:9000"    # REST
+      - "2222:2222"    # CLI over SSH
+    volumes:
+      - solace-data:/var/lib/solace
+    networks: [lab]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION:-9.5.2}
+    container_name: elasticsearch
+    environment:
+      - node.name=es01
+      - cluster.name=solace-lab
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false          # nur für lokale Labs!
+      - xpack.security.enrollment.enabled=false
+      - xpack.license.self_generated.type=basic
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks: [lab]
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${STACK_VERSION:-9.5.2}
+    container_name: kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_PUBLICBASEURL=http://localhost:5601
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=a7f3c1d9b45e28a06c1f7d3e94b8250a
+      - XPACK_REPORTING_ENCRYPTIONKEY=9b2e14c8d0a63f57e81c4a95d7b302f6
+      - XPACK_SECURITY_ENCRYPTIONKEY=4d81f0a72c9e56b3081da4f7c25e69b1
+    ports:
+      - "5601:5601"
+    networks: [lab]
+
+  elastic-agent:
+    image: docker.elastic.co/elastic-agent/elastic-agent:${STACK_VERSION:-9.5.2}
+    container_name: elastic-agent
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    user: root
+    restart: unless-stopped
+    volumes:
+      - ./elastic-agent.yml:/usr/share/elastic-agent/elastic-agent.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - agent-state:/usr/share/elastic-agent/state
+    ports:
+      - "9514:9514"
+    networks: [lab]
+
+volumes:
+  solace-data:
+  es-data:
+  agent-state:
+
+networks:
+  lab:
+    driver: bridge
